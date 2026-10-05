@@ -21,6 +21,12 @@
 - Hand-curated the handful of self-referential historical log lines (contract-rename and product-rename sections) so they stay truthful after the mechanical substitution.
 - Checks: `npx tsc --noEmit` PASS, `npx eslint .` 0/0, Vitest 35 passed (7 files), `vite build` PASS, `python3 scripts/preflight.py` PASS, `npm run verify:deployment-source` PASS (SHA parity `149372c2…`), source tests 8/8 run directly (system-pytest collection still blocked in this workspace).
 
+## 2026-10-06 — curated UI gallery added to README
+
+- Owner supplied 105 screenshots in `~/Documents/LoreChainUIImages` (16 MB). All were visually classified; 21 are LoreChain project UI and were copied to `ui/screenshots/` (3.1 MB) with meaningful names; the rest were discarded (unrelated "Tolerance" commercial app, a PDF, GenLayer explorer/dashboards, GitHub/Vercel/Supabase admin pages, blank fragments).
+- Gallery split: 15 current-brand captures (home, world desk, create-world flow with consensus tx, Rabby sign-in, recall idle/history, deployed sync diagnostics) and 6 clearly-labeled lineage captures from the earlier CanonMesh-era theme covering routes with no current-theme shots (composer, COMPATIBLE review, receipt, branches, timeline, first recall result).
+- README gained an "Interface gallery" section with captioned tables. Committed as `c0cf310` and pushed.
+
 ## 2026-10-05 — recall history syncs to Supabase per wallet (owner-approved exception)
 
 - Owner chose Supabase for recall-history persistence after the on-chain option was rejected. Implemented `lib/supabase/recall-store.ts`: env-gated client (`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`), EIP-4361 `signInWithWeb3` (auto-detects the injected wallet), and save/load/clear for table `recall_runs`. `supabase/schema.sql` creates the table with RLS (`auth.uid() = user_id` on select/insert/delete) and a `(user_id, created_at desc)` index.
