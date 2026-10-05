@@ -57,6 +57,22 @@ There is **no project backend, application database, custom indexer, API service
 
 The visual system is an editorial story bible with manuscript rules and marginalia, using paper/ink/vermilion/olive rather than a generic Web3/AI dashboard.
 
+## Interface gallery
+
+| | | |
+| --- | --- | --- |
+| ![](ui/screenshots/home-empty-contract-dark.png)<br/>Home landing — contract not configured (dark) | ![](ui/screenshots/desk-empty-ledger-dark.png)<br/>World desk — empty ledger | ![](ui/screenshots/desk-create-world-dark.png)<br/>Create world — “Open a new universe.” |
+| ![](ui/screenshots/desk-create-world-filled-dark.png)<br/>Create world — charter filled (The Ember Archive) | ![](ui/screenshots/desk-create-world-consensus-dark.png)<br/>Create world — consensus tx, StudioNet finality | ![](ui/screenshots/desk-world-created-dark.png)<br/>World created — contract register counts |
+| ![](ui/screenshots/wallet-signin-rabby-dark.png)<br/>Wallet sign-in — personal_sign (Rabby) | ![](ui/screenshots/recall-empty-connected-dark.png)<br/>Semantic recall — wallet connected | ![](ui/screenshots/recall-idle-dark.png)<br/>Semantic recall — idle state |
+| ![](ui/screenshots/recall-history-deployed-dark.png)<br/>Recall history kept per browser | ![](ui/screenshots/recall-history-supabase-dark.png)<br/>Deployed recall page with sync diagnostics | ![](ui/screenshots/desk-ledger-browser-dark.png)<br/>World desk — full browser view |
+
+| Lineage (earlier CanonMesh-era theme, same product) | | |
+| --- | --- | --- |
+| ![](ui/screenshots/lineage-proposal-composer.png)<br/>Proposal composer — Sundering fact + evidence hash | ![](ui/screenshots/lineage-proposal-review-compatible.png)<br/>Proposal review — settled COMPATIBLE | ![](ui/screenshots/lineage-decision-receipt.png)<br/>Decision receipt with tx/session proof |
+| ![](ui/screenshots/lineage-branches.png)<br/>Branch genealogy — “Fork the story, not the truth.” | ![](ui/screenshots/lineage-timeline.png)<br/>Time-anchor timeline | ![](ui/screenshots/lineage-first-recall-result.png)<br/>First live recall result (distance 0.828) |
+
+Brand lockup: ![](ui/screenshots/brand-lockup.jpeg)
+
 ## GenLayer baseline
 
 - Network: StudioNet
