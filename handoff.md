@@ -21,6 +21,15 @@
 - Hand-curated the handful of self-referential historical log lines (contract-rename and product-rename sections) so they stay truthful after the mechanical substitution.
 - Checks: `npx tsc --noEmit` PASS, `npx eslint .` 0/0, Vitest 35 passed (7 files), `vite build` PASS, `python3 scripts/preflight.py` PASS, `npm run verify:deployment-source` PASS (SHA parity `149372c2…`), source tests 8/8 run directly (system-pytest collection still blocked in this workspace).
 
+## 2026-10-05 — repository published to GitHub
+
+- Initialized git in this workspace (it had no `.git` metadata) and published to `https://github.com/habte-selassie27/Lore-Chain` (owner `habte-selassie27`), branch `main`.
+- History is 50 structured commits: scaffold → build config → deploy config → SPA entry → docs → contract → lib → genlayer clients → stylesheet → app bootstrap/routes → components → page routes → tests → ops/CI. Verified `git rev-list --count HEAD` = 50 with a clean tree.
+- Push verified: remote `refs/heads/main` = `6ae342d5718a054ff50315d0228386727a6440ea`.
+- `.gitignore` extended with `tsconfig.tsbuildinfo`; `.env.local`, `dist/`, `.venv/`, `artifacts/`, `node_modules/` all confirmed ignored before staging.
+- GitHub Actions `verify` run `37368884047` triggered on push; result not yet observed at write time.
+- `DEPLOYMENT.json` `source_commit` updated from `null` to the publication commit (its tree contains the deployed contract source).
+
 ## 2026-10-05 — palette refresh (porcelain/cerulean/sage), Three.js hero, richer home copy
 
 - Owner requested a new color direction away from the warm paper/beige: light identity is now porcelain paper `#EEF3F6`, ink `#10181E`, cerulean accent `#0E5E8A`, sage `#5E8A6E`, charcoal `#4E6470`; dark block redefined in the same hue families (`#0E1418`/`#E4ECEF`/`#4FA3D8`/`#93B89D`). Token names and the token-only rule are unchanged; `tests/frontend/theme-tokens.test.ts` and `tests/direct/test_frontend_source.py::test_visual_identity` now pin the new hexes. `ui/ux.md` color table and `memory.md` UI identity updated.

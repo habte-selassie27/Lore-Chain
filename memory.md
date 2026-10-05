@@ -10,7 +10,7 @@ It settles which bounded facts belong to which world/branch/version and which ea
 
 ## Current status
 
-- Contract + full frontend implemented on `main`.
+- Contract + full frontend implemented on `main`; repository published at https://github.com/habte-selassie27/Lore-Chain (50-commit structured history, head `6ae342d`).
 - Architecture: StudioNet Intelligent Contract + Vercel frontend only.
 - Current source uses Vite/React Router; the durable release target remains StudioNet + injected wallet + FINALIZED GenVM verification.
 - Current rename checks: preflight PASS, source unit subset 22 passed, frontend Vitest 35 passed, TypeScript PASS, ESLint 0/0, Vite production build PASS, `verify:deployment-source` PASS, `npm audit:prod` clean.
