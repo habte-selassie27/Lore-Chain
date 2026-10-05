@@ -1,0 +1,1557 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { CHAIN_ID, CHAIN_NAME, CONTRACT_ADDRESS, explorerAddressUrl } from "@/lib/genlayer/config";
+import {
+  getEntry,
+  getProposal,
+  getStats,
+  getWorld,
+  isEditor,
+  getBranch,
+  listBranches,
+  listEntityEntries,
+  listWorldEntries,
+  listWorldProposals,
+  listWorlds,
+  previewRelated,
+  searchLorechain,
+  waitForFinalized,
+  writeContract,
+} from "@/lib/genlayer/data-source";
+import type {
+  Branch,
+  LorechainEntry,
+  ContractStats,
+  Proposal,
+  ReadResult,
+  RelatedLorechain,
+  World,
+} from "@/lib/types";
+import { useWallet } from "./wallet-provider";
+import {
+  BackLink,
+  EmptyPage,
+  HashRef,
+  LedgerRule,
+  ReadState,
+  StatusMark,
+} from "./ui";
+import { IDLE_TX, TransactionRail, type TxState } from "./transaction-rail";
+import { branchStatusWriteEligible, effectiveBranchActivity, inactiveAncestorLabel, proposalCancellationEligible } from "@/lib/branch-lineage";
+import { formatWriteError } from "@/lib/error-format";
+import {
+  confirmBranchCreated,
+  confirmReviewedProposal,
+  confirmWorldCreated,
+  findSubmittedProposal,
+  confirmBranchStatus,
+  confirmCancelledProposal,
+  confirmStaleProposal,
+  confirmEditorState,
+  editorOperationAllowed,
+} from "@/lib/genlayer/confirmations";
+import { proposalLineageIsStale } from "@/lib/branch-lineage";
+
+const keys = (raw: string): string[] => {
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
+};
+const ids = (raw: string) => {
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : [];
+  } catch {
+    return [];
+  }
+};
+
+export function WorldDesk() {
+  const wallet = useWallet();
+  const [worlds, setWorlds] = useState<ReadResult<World[]>>();
+  const [stats, setStats] = useState<ReadResult<ContractStats>>();
+  const [selected, setSelected] = useState<number>();
+  const [branches, setBranches] = useState<ReadResult<Branch[]>>();
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [charter, setCharter] = useState("");
+  const [url, setUrl] = useState("");
+  const [digest, setDigest] = useState("");
+  const [editorAddress, setEditorAddress] = useState("");
+  const [tx, setTx] = useState<TxState>(IDLE_TX);
+  const [error, setError] = useState<string>();
+  const refresh = useCallback(async () => {
+    const [w, s] = await Promise.all([listWorlds(), getStats()]);
+    setWorlds(w);
+    setStats(s);
+    if (w.kind === "AVAILABLE" && w.value.length && !selected)
+      setSelected(w.value[0].id);
+  }, [selected]);
+  useEffect(() => {
+    queueMicrotask(() => void refresh());
+  }, [refresh]);
+  useEffect(() => {
+    if (selected) void listBranches(selected).then(setBranches);
+  }, [selected]);
+  const world =
+    worlds?.kind === "AVAILABLE"
+      ? worlds.value.find((w) => w.id === selected)
+      : undefined;
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const before = await listWorlds();
+      if (before.kind !== "AVAILABLE")
+        throw new Error("Authoritative world state is unavailable before write.");
+      const client = await wallet.getWriteClient();
+      setTx({ stage: "signature", message: "Approve world creation." });
+      const hash = await writeContract(client, "create_world", [
+        name,
+        charter,
+        url,
+        digest,
+      ]);
+      setTx({
+        stage: "finalizing",
+        hash,
+        message: "Waiting for StudioNet finality.",
+      });
+      await waitForFinalized(client, hash);
+      setTx({
+        stage: "confirming",
+        hash,
+        message:
+          "Execution succeeded; confirming authoritative contract state.",
+      });
+      const after = await listWorlds();
+      if (after.kind !== "AVAILABLE")
+        throw new Error("Authoritative world state is unavailable after write.");
+      const confirmed = confirmWorldCreated(before.value, after.value, {
+        name,
+        charter_text: charter,
+        charter_url: url,
+        charter_digest: digest,
+      });
+      if (!confirmed)
+        throw new Error("The expected new world was not uniquely confirmed on-chain.");
+      setCreating(false);
+      setName("");
+      setCharter("");
+      setUrl("");
+      setDigest("");
+      const latestStats = await getStats();
+      setWorlds(after);
+      setStats(latestStats);
+      setTx({
+        stage: "success",
+        hash,
+        message: "Authoritative contract state confirmed.",
+      });
+    } catch (e) {
+      const m = formatWriteError(e, tx.hash);
+      setError(m);
+      setTx((x) => ({ stage: "error", hash: x.hash, message: m }));
+    }
+  }
+  async function updateEditor(enabled: boolean) {
+    if (!world || !editorOperationAllowed(enabled, editorAddress, world.steward, wallet.address)) {
+      if (world && !enabled && editorAddress.toLowerCase() === world.steward.toLowerCase()) setError("The world steward cannot revoke their own editor authority.");
+      return;
+    }
+    try {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(editorAddress)) throw new Error("Enter a valid EVM address.");
+      const client = await wallet.getWriteClient();
+      const hash = await writeContract(client, "set_editor", [BigInt(world.id), editorAddress, enabled]);
+      setTx({stage:"finalizing", hash, message:"Waiting for editor permission finality."});
+      await waitForFinalized(client, hash);
+      setTx({stage:"confirming", hash, message:"Execution succeeded; confirming editor state."});
+      const result = await isEditor(world.id, editorAddress);
+      if (result.kind !== "AVAILABLE" || !confirmEditorState(result.value, enabled)) throw new Error("Finalized editor permission did not match the requested state.");
+      setTx({stage:"success", hash, message:"Editor permission confirmed in finalized contract state."});
+    } catch (e) { setTx({stage:"error", message:formatWriteError(e, tx.hash)}); }
+  }
+  if (!CONTRACT_ADDRESS)
+    return (
+      <EmptyPage
+        eyebrow="Live configuration"
+        title="LoreChain is ready for its contract address."
+      >
+        <p>
+          No fallback dataset exists. Configure{" "}
+          <code>NEXT_PUBLIC_LORECHAIN_CONTRACT</code> after the StudioNet
+          deployment.
+        </p>
+      </EmptyPage>
+    );
+  return (
+    <div className="world-desk">
+      <aside className="desk-index">
+        <div className="pane-heading">
+          <h2>World index</h2>
+          <span>
+            {worlds?.kind === "AVAILABLE" ? worlds.value.length : "—"} folios
+          </span>
+        </div>
+        <ReadState result={worlds}>
+          {(items) =>
+            items.length ? (
+              <ul className="index-list">
+                {items.map((w) => (
+                  <li key={w.id}>
+                    <button
+                      className="index-row"
+                      data-active={w.id === selected}
+                      onClick={() => setSelected(w.id)}
+                    >
+                      <strong>{w.name}</strong>
+                      <small>
+                        <span>v{w.version}</span>
+                        <span>{w.entry_count} lorechain</span>
+                        <span>{w.branch_count} branches</span>
+                      </small>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="margin-section">
+                <p className="deck">
+                  No worlds exist yet. This is real contract state.
+                </p>
+              </div>
+            )
+          }
+        </ReadState>
+        <button
+          className="secondary-action index-action"
+          onClick={() => setCreating((x) => !x)}
+        >
+          {creating ? "Close form" : "Create world"}
+        </button>
+      </aside>
+      <section className="desk-manuscript">
+        {creating ? (
+          <form className="form-sheet" onSubmit={create}>
+            <p className="eyebrow">New folio · on-chain charter</p>
+            <h1>Open a new universe.</h1>
+            <div className="field-grid">
+              <div className="field full">
+                <label>World name</label>
+                <input
+                  required
+                  maxLength={120}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <div className="field full">
+                <label>Lorechain charter</label>
+                <textarea
+                  required
+                  maxLength={4000}
+                  value={charter}
+                  onChange={(e) => setCharter(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Public charter URL · optional</label>
+                <input
+                  type="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>SHA-256 · required with URL</label>
+                <input
+                  value={digest}
+                  onChange={(e) => setDigest(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="form-actions">
+              <button className="primary-action" disabled={!wallet.canWrite}>
+                Create world
+              </button>
+              {!wallet.canWrite && (
+                <span className="field-help">{wallet.writeBlockedReason}</span>
+              )}
+            </div>
+            {error && <div className="form-error">{error}</div>}
+            <TransactionRail tx={tx} />
+          </form>
+        ) : world ? (
+          <>
+            <header className="manuscript-header">
+              <p className="eyebrow">World {world.id} · lorechain folio</p>
+              <h1>{world.name}</h1>
+              <div className="manuscript-meta">
+                <span>version {world.version}</span>
+                <span>{world.entry_count} lorechain</span>
+                <span>{world.proposal_count} proposals</span>
+              </div>
+            </header>
+            <blockquote className="charter-block">
+              {world.charter_text}
+            </blockquote>
+            <div className="action-band">
+              <Link
+                className="primary-action"
+                to={`/worlds/${world.id}/lorechain`}
+              >
+                Open lorechain ledger
+              </Link>
+              <Link
+                className="secondary-action"
+                to={`/worlds/${world.id}/proposals/new`}
+              >
+                Propose lorechain
+              </Link>
+              <Link
+                className="secondary-action"
+                to={`/worlds/${world.id}/branches`}
+              >
+                Branch map
+              </Link>
+              <Link
+                className="secondary-action"
+                to={`/worlds/${world.id}/timeline`}
+              >
+                Timeline
+              </Link>
+            </div>
+          </>
+        ) : (
+          <ReadState result={worlds}>
+            {() => (
+              <EmptyPage eyebrow="World desk" title="The ledger is empty.">
+                <p>Create the first world with an injected wallet.</p>
+              </EmptyPage>
+            )}
+          </ReadState>
+        )}
+      </section>
+      <aside className="desk-margin">
+        {world && <section className="margin-section">
+          <h3>World governance</h3>
+          <p className="field-help">Steward: <code>{world.steward}</code></p>
+          <form onSubmit={(e) => e.preventDefault()}>
+            <label>Editor address</label>
+            <input value={editorAddress} onChange={(e) => setEditorAddress(e.target.value)} placeholder="0x…" />
+            <div className="form-actions">
+              <button type="button" className="secondary-action" disabled={!wallet.canWrite || !editorOperationAllowed(true, editorAddress, world.steward, wallet.address)} onClick={() => void updateEditor(true)}>Grant editor</button>
+              <button type="button" className="secondary-action" disabled={!wallet.canWrite || !editorOperationAllowed(false, editorAddress, world.steward, wallet.address)} onClick={() => void updateEditor(false)}>Revoke editor</button>
+              {editorAddress.toLowerCase() === world.steward.toLowerCase() && <small className="field-help">The steward cannot revoke their own authority.</small>}
+            </div>
+            {wallet.address?.toLowerCase() !== world.steward.toLowerCase() && <small className="field-help">World steward only</small>}
+          </form>
+        </section>}
+        <section className="margin-section">
+          <h3>Contract register</h3>
+          <ReadState result={stats}>
+            {(s) => (
+              <>
+                <LedgerRule label="Worlds" value={s.world_count} />
+                <LedgerRule label="Branches" value={s.branch_count} />
+                <LedgerRule label="Lorechain" value={s.entry_count} />
+                <LedgerRule label="Proposals" value={s.proposal_count} />
+                <LedgerRule
+                  label="Memory"
+                  value={`${s.embedding_model} · ${s.vector_dimensions}d`}
+                />
+              </>
+            )}
+          </ReadState>
+        </section>
+        <section className="margin-section">
+          <h3>Selected branches</h3>
+          <ReadState result={branches}>
+            {(items) =>
+              items.map((b) => (
+                <div className="related-card" key={b.id}>
+                  <strong>{b.name}</strong>
+                  <span className="related-distance">
+                    branch {b.id} · v{b.version}
+                  </span>
+                </div>
+              ))
+            }
+          </ReadState>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+export function LorechainLedger({ worldId }: { worldId: number }) {
+  const [world, setWorld] = useState<ReadResult<World>>();
+  const [branches, setBranches] = useState<ReadResult<Branch[]>>();
+  const [entries, setEntries] = useState<ReadResult<LorechainEntry[]>>();
+  const [proposals, setProposals] = useState<ReadResult<Proposal[]>>();
+  const [filter, setFilter] = useState<number | "all">("all");
+  useEffect(() => {
+    void Promise.all([
+      getWorld(worldId).then(setWorld),
+      listBranches(worldId).then(setBranches),
+      listWorldEntries(worldId).then(setEntries),
+      listWorldProposals(worldId).then(setProposals),
+    ]);
+  }, [worldId]);
+  const branchMap = useMemo(
+    () =>
+      new Map(
+        branches?.kind === "AVAILABLE"
+          ? branches.value.map((b) => [b.id, b.name])
+          : [],
+      ),
+    [branches],
+  );
+  return (
+    <div className="page-shell">
+      <ReadState result={world}>
+        {(w) => (
+          <header className="page-heading" data-folio="01">
+            <BackLink href="/desk">World desk</BackLink>
+            <p className="eyebrow">{w.name} · lorechain ledger</p>
+            <h1>Lorechain, without erasure.</h1>
+            <p className="deck">
+              Accepted facts remain addressable across versions. Retcons
+              preserve history; branch divergences do not rewrite the parent.
+            </p>
+          </header>
+        )}
+      </ReadState>
+      <div className="manuscript-grid">
+        <section className="manuscript-main">
+          <div className="action-band">
+            <Link
+              className="primary-action"
+              to={`/worlds/${worldId}/proposals/new`}
+            >
+              Propose lorechain
+            </Link>
+            <Link
+              className="secondary-action"
+              to={`/worlds/${worldId}/timeline`}
+            >
+              Timeline
+            </Link>
+            <Link
+              className="secondary-action"
+              to={`/worlds/${worldId}/branches`}
+            >
+              Branches
+            </Link>
+            <Link
+              className="secondary-action"
+              to={`/search?world=${worldId}`}
+            >
+              Semantic recall
+            </Link>
+          </div>
+          <ReadState result={entries}>
+            {(items) => {
+              const rows = items.filter(
+                (e) => filter === "all" || e.branch_id === filter,
+              );
+              return rows.length ? (
+                <table className="record-table">
+                  <thead>
+                    <tr>
+                      <th>Entry</th>
+                      <th>Branch</th>
+                      <th>Statement</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((e) => (
+                      <tr key={e.id}>
+                        <td>
+                          <span className="eyebrow">#{e.id}</span>
+                          <strong>{e.title}</strong>
+                          <div>{e.time_anchor}</div>
+                        </td>
+                        <td>
+                          {branchMap.get(e.branch_id) ??
+                            `Branch ${e.branch_id}`}
+                        </td>
+                        <td>
+                          <div
+                            className={`entry-statement ${e.superseded_by ? "superseded" : ""}`}
+                          >
+                            {e.statement}
+                          </div>
+                          <div className="entity-row">
+                            {keys(e.entity_keys_json).map((k) => (
+                              <Link
+                                key={k}
+                                className="entity-link"
+                                to={`/worlds/${worldId}/entities/${encodeURIComponent(k)}`}
+                              >
+                                @{k}
+                              </Link>
+                            ))}
+                          </div>
+                          {e.superseded_by > 0 && (
+                            <small>Superseded by #{e.superseded_by}</small>
+                          )}
+                        </td>
+                        <td>
+                          <StatusMark status={e.status} />
+                          <div>
+                            <Link
+                              className="text-action"
+                              to={`/receipts/${e.proposal_id}`}
+                            >
+                              receipt
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="loading-sheet">
+                  No accepted lorechain matches this view.
+                </div>
+              );
+            }}
+          </ReadState>
+        </section>
+        <aside className="marginalia">
+          <div className="margin-section">
+            <h3>Branch lens</h3>
+            <div className="field">
+              <select
+                value={filter}
+                onChange={(e) =>
+                  setFilter(
+                    e.target.value === "all" ? "all" : Number(e.target.value),
+                  )
+                }
+              >
+                <option value="all">All branches</option>
+                {branches?.kind === "AVAILABLE" &&
+                  branches.value.map((b) => (
+                    <option value={b.id} key={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+          <div className="margin-section">
+            <h3>Proposal register</h3>
+            <ReadState result={proposals}>
+              {(items) =>
+                items
+                  .slice()
+                  .reverse()
+                  .slice(0, 10)
+                  .map((p) => (
+                    <div className="related-card" key={p.id}>
+                      <Link to={`/proposals/${p.id}`}>
+                        <strong>{p.title}</strong>
+                      </Link>
+                      <StatusMark status={p.status} />
+                    </div>
+                  ))
+              }
+            </ReadState>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+export function EntityDossier({
+  worldId,
+  entityKey,
+}: {
+  worldId: number;
+  entityKey: string;
+}) {
+  const [entries, setEntries] = useState<ReadResult<LorechainEntry[]>>();
+  useEffect(() => {
+    void listEntityEntries(worldId, entityKey).then(setEntries);
+  }, [worldId, entityKey]);
+  return (
+    <div className="page-shell">
+      <header className="page-heading" data-folio="02">
+        <BackLink href={`/worlds/${worldId}/lorechain`}>Lorechain ledger</BackLink>
+        <p className="eyebrow">Entity dossier</p>
+        <h1>{entityKey}</h1>
+        <p className="deck">
+          Accepted lorechain indexed to this normalized entity key.
+        </p>
+      </header>
+      <ReadState result={entries}>
+        {(items) =>
+          items.length ? (
+            items.map((e, i) => (
+              <article
+                className="manuscript-note"
+                data-tone={e.superseded_by ? "red" : "plain"}
+                key={e.id}
+              >
+                <div className="note-index">
+                  {String(i + 1).padStart(2, "0")}
+                </div>
+                <div>
+                  <p className="eyebrow">
+                    Entry #{e.id} · branch {e.branch_id}
+                  </p>
+                  <h2>{e.title}</h2>
+                  <p className={e.superseded_by ? "superseded" : ""}>
+                    {e.statement}
+                  </p>
+                  <Link
+                    className="text-action"
+                    to={`/receipts/${e.proposal_id}`}
+                  >
+                    decision receipt
+                  </Link>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="loading-sheet">
+              No accepted lorechain is indexed to this entity.
+            </div>
+          )
+        }
+      </ReadState>
+    </div>
+  );
+}
+
+export function TimelineView({ worldId }: { worldId: number }) {
+  const [entries, setEntries] = useState<ReadResult<LorechainEntry[]>>();
+  useEffect(() => {
+    void listWorldEntries(worldId).then(setEntries);
+  }, [worldId]);
+  return (
+    <div className="page-shell">
+      <header className="page-heading" data-folio="03">
+        <BackLink href={`/worlds/${worldId}/lorechain`}>Lorechain ledger</BackLink>
+        <p className="eyebrow">Temporal folio</p>
+        <h1>Lorechain through time.</h1>
+      </header>
+      <ReadState result={entries}>
+        {(items) => (
+          <section className="timeline">
+            <div className="timeline-track">
+              {items
+                .slice()
+                .sort(
+                  (a, b) =>
+                    a.time_anchor.localeCompare(b.time_anchor) || a.id - b.id,
+                )
+                .map((e) => (
+                  <article className="timeline-entry" key={e.id}>
+                    <time>{e.time_anchor || `entry ${e.id}`}</time>
+                    <h3>{e.title}</h3>
+                    <p>{e.statement}</p>
+                    <div className="related-distance">
+                      branch {e.branch_id}
+                      {e.superseded_by
+                        ? ` · superseded by #${e.superseded_by}`
+                        : ""}
+                    </div>
+                  </article>
+                ))}
+            </div>
+          </section>
+        )}
+      </ReadState>
+    </div>
+  );
+}
+
+export function BranchMap({ worldId }: { worldId: number }) {
+  const wallet = useWallet();
+  const [world, setWorld] = useState<ReadResult<World>>();
+  const [branches, setBranches] = useState<ReadResult<Branch[]>>();
+  const [name, setName] = useState("");
+  const [parent, setParent] = useState<number>();
+  const [tx, setTx] = useState<TxState>(IDLE_TX);
+  const refresh = useCallback(async () => {
+    const [w, r] = await Promise.all([getWorld(worldId), listBranches(worldId)]);
+    setWorld(w);
+    setBranches(r);
+    if (r.kind === "AVAILABLE" && !parent) {
+      const firstEligible = r.value.find((candidate) => effectiveBranchActivity(candidate.id, r.value));
+      if (firstEligible) setParent(firstEligible.id);
+    }
+  }, [parent, worldId]);
+  useEffect(() => {
+    queueMicrotask(() => void refresh());
+  }, [refresh]);
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    if (!parent) return;
+    try {
+      const before = await listBranches(worldId);
+      if (before.kind !== "AVAILABLE")
+        throw new Error("Authoritative branch state is unavailable before write.");
+      const client = await wallet.getWriteClient();
+      const hash = await writeContract(client, "create_branch", [
+        BigInt(worldId),
+        name,
+        BigInt(parent),
+      ]);
+      setTx({
+        stage: "finalizing",
+        hash,
+        message: "Waiting for branch creation finality.",
+      });
+      await waitForFinalized(client, hash);
+      setTx({
+        stage: "confirming",
+        hash,
+        message:
+          "Execution succeeded; confirming authoritative contract state.",
+      });
+      const after = await listBranches(worldId);
+      if (after.kind !== "AVAILABLE")
+        throw new Error("Authoritative branch state is unavailable after write.");
+      const confirmed = confirmBranchCreated(before.value, after.value, {
+        world_id: worldId,
+        parent_branch_id: parent,
+        name,
+      });
+      if (!confirmed)
+        throw new Error("The expected new branch was not uniquely confirmed on-chain.");
+      setName("");
+      setBranches(after);
+      setTx({
+        stage: "success",
+        hash,
+        message: "Authoritative contract state confirmed.",
+      });
+    } catch (e) {
+      setTx({
+        stage: "error",
+        message: formatWriteError(e, tx.hash),
+      });
+    }
+  }
+  async function toggleBranch(branch: Branch) {
+    if (!world || world.kind !== "AVAILABLE" || wallet.address?.toLowerCase() !== world.value.steward.toLowerCase() || !branchStatusWriteEligible(branch)) return;
+    try {
+      const before = await getBranch(branch.id);
+      if (before.kind !== "AVAILABLE") throw new Error("Branch state is unavailable before write.");
+      const client = await wallet.getWriteClient();
+      const hash = await writeContract(client, "set_branch_active", [BigInt(branch.id), !branch.active]);
+      setTx({stage:"finalizing", hash, message:"Waiting for branch status finality."});
+      await waitForFinalized(client, hash);
+      setTx({stage:"confirming", hash, message:"Execution succeeded; confirming finalized branch state."});
+      const after = await getBranch(branch.id);
+      if (after.kind !== "AVAILABLE" || !confirmBranchStatus(before.value, after.value, !branch.active)) throw new Error("Finalized branch status did not match the requested state.");
+      await refresh();
+      setTx({stage:"success", hash, message:"Branch status confirmed in finalized contract state."});
+    } catch (e) { setTx({stage:"error", message:formatWriteError(e, tx.hash)}); }
+  }
+  return (
+    <div className="page-shell">
+      <header className="page-heading" data-folio="04">
+        <BackLink href={`/worlds/${worldId}/lorechain`}>Lorechain ledger</BackLink>
+        <p className="eyebrow">Branch genealogy</p>
+        <h1>Fork the story, not the truth.</h1>
+      </header>
+      <div className="manuscript-grid">
+        <section className="branch-tree">
+          <ReadState result={branches}>
+            {(items) =>
+              items.map((b) => (
+                <article className="branch-node" key={b.id}>
+                  <div className="branch-depth">
+                    {b.parent_branch_id === 0
+                      ? "ROOT"
+                      : `↳ ${b.parent_branch_id}`}
+                  </div>
+                  <div>
+                    <h3>{b.name}</h3>
+                    <small>
+                      branch {b.id} · v{b.version} · {b.entry_count} entries
+                    </small>
+                  </div>
+                  <StatusMark status={b.active ? "ACTIVE" : "INACTIVE"} />
+                   {!effectiveBranchActivity(b.id, items) && (
+                     <small className="field-help">{inactiveAncestorLabel(b.id, items)}</small>
+                   )}
+                   <button className="text-action" disabled={!wallet.canWrite || !branchStatusWriteEligible(b) || wallet.address?.toLowerCase() !== (world?.kind === "AVAILABLE" ? world.value.steward.toLowerCase() : "")} onClick={() => void toggleBranch(b)}>
+                     {b.parent_branch_id === 0 ? "Root cannot be deactivated" : b.active ? "Deactivate" : "Activate"}
+                   </button>
+                   {wallet.address?.toLowerCase() !== (world?.kind === "AVAILABLE" ? world.value.steward.toLowerCase() : "") && b.parent_branch_id !== 0 && <small className="field-help">World steward only</small>}
+                 </article>
+              ))
+            }
+          </ReadState>
+        </section>
+        <aside className="marginalia">
+          <form className="margin-section" onSubmit={create}>
+            <h3>Create branch</h3>
+            <div className="field">
+              <label>Name</label>
+              <input
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Parent</label>
+              <select
+                value={parent ?? ""}
+                onChange={(e) => setParent(Number(e.target.value))}
+              >
+                {branches?.kind === "AVAILABLE" &&
+                  branches.value
+                    .filter((b) => effectiveBranchActivity(b.id, branches.value))
+                    .map((b) => (
+                      <option value={b.id} key={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+              </select>
+            </div>
+            <button
+              className="primary-action"
+              disabled={!wallet.canWrite || !parent}
+            >
+              Create branch
+            </button>
+            <TransactionRail tx={tx} />
+          </form>
+          <div className="margin-section">
+            <h3>Branch discipline</h3>
+            <p className="entry-statement">
+              Same-branch RETCON supersedes only same-branch lorechain. BRANCH_ONLY
+              shadows inherited facts only for this branch and descendants.
+            </p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+export function ProposalComposer({ worldId }: { worldId: number }) {
+  const wallet = useWallet();
+  const navigate = useNavigate();
+  const [branches, setBranches] = useState<ReadResult<Branch[]>>();
+  const [branch, setBranch] = useState<number>();
+  const [mode, setMode] = useState<"ADD" | "RETCON" | "BRANCH">("ADD");
+  const [title, setTitle] = useState("");
+  const [statement, setStatement] = useState("");
+  const [entities, setEntities] = useState("");
+  const [time, setTime] = useState("");
+  const [url, setUrl] = useState("");
+  const [digest, setDigest] = useState("");
+  const [editor, setEditor] = useState<boolean>();
+  const [tx, setTx] = useState<TxState>(IDLE_TX);
+  useEffect(() => {
+    void listBranches(worldId).then((r) => {
+      setBranches(r);
+      if (r.kind === "AVAILABLE") {
+        const firstEligible = r.value.find((candidate) => effectiveBranchActivity(candidate.id, r.value));
+        if (firstEligible) setBranch(firstEligible.id);
+      }
+    });
+  }, [worldId]);
+  useEffect(() => {
+    if (wallet.address)
+      void isEditor(worldId, wallet.address).then((r) =>
+        setEditor(r.kind === "AVAILABLE" ? r.value : false),
+      );
+  }, [wallet.address, worldId]);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!branch) return;
+    try {
+      const before = await listWorldProposals(worldId);
+      if (before.kind !== "AVAILABLE")
+        throw new Error("Authoritative proposal state is unavailable before write.");
+      const client = await wallet.getWriteClient();
+      const entityJson = JSON.stringify(
+        entities
+          .split(",")
+          .map((x) => x.trim().toLowerCase())
+          .filter(Boolean),
+      );
+      const hash = await writeContract(client, "submit_proposal", [
+        BigInt(worldId),
+        BigInt(branch),
+        mode,
+        title,
+        statement,
+        url,
+        digest,
+        entityJson,
+        time,
+      ]);
+      setTx({
+        stage: "finalizing",
+        hash,
+        message: "Waiting for proposal finality.",
+      });
+      await waitForFinalized(client, hash);
+      setTx({
+        stage: "confirming",
+        hash,
+        message:
+          "Execution succeeded; confirming authoritative contract state.",
+      });
+      const ps = await listWorldProposals(worldId);
+      if (ps.kind !== "AVAILABLE")
+        throw new Error("Authoritative proposal state is unavailable after write.");
+      const confirmed = findSubmittedProposal(before.value, ps.value, {
+        proposer: wallet.address ?? "",
+        world_id: worldId,
+        branch_id: branch,
+        mode,
+        title,
+        statement,
+        artifact_url: url,
+        artifact_digest: digest,
+        entity_keys_json: entityJson,
+      });
+      if (!confirmed)
+        throw new Error("The new proposal was not uniquely confirmed on-chain.");
+      setTx({
+        stage: "success",
+        hash,
+        message: "Authoritative contract state confirmed.",
+      });
+      navigate(`/proposals/${confirmed.id}`);
+    } catch (e) {
+      setTx({
+        stage: "error",
+        message: formatWriteError(e, tx.hash),
+      });
+    }
+  }
+  return (
+    <div className="page-shell">
+      <header className="page-heading" data-folio="05">
+        <BackLink href={`/worlds/${worldId}/lorechain`}>Lorechain ledger</BackLink>
+        <p className="eyebrow">Proposal composer</p>
+        <h1>Write the smallest fact that changes the world.</h1>
+      </header>
+      <div className="manuscript-grid">
+        <form className="form-sheet" onSubmit={submit}>
+          <div className="field-grid">
+            <div className="field">
+              <label>Branch</label>
+              <select
+                value={branch ?? ""}
+                onChange={(e) => setBranch(Number(e.target.value))}
+              >
+                {branches?.kind === "AVAILABLE" &&
+                  branches.value
+                    .filter((b) => effectiveBranchActivity(b.id, branches.value))
+                    .map((b) => (
+                      <option value={b.id} key={b.id}>
+                        {b.name} · v{b.version}
+                      </option>
+                    ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Mode</label>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as typeof mode)}
+              >
+                <option>ADD</option>
+                <option>RETCON</option>
+                <option>BRANCH</option>
+              </select>
+            </div>
+            <div className="field full">
+              <label>Title</label>
+              <input
+                required
+                maxLength={180}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <div className="field full">
+              <label>Lorechain statement</label>
+              <textarea
+                required
+                maxLength={2400}
+                value={statement}
+                onChange={(e) => setStatement(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Entity keys · comma separated</label>
+              <input
+                value={entities}
+                onChange={(e) => setEntities(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Time anchor</label>
+              <input value={time} onChange={(e) => setTime(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Public evidence URL · optional</label>
+              <input
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>SHA-256 · required with URL</label>
+              <input
+                value={digest}
+                onChange={(e) => setDigest(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="form-actions">
+            <button
+              className="primary-action"
+              disabled={!wallet.canWrite || editor === false}
+            >
+              Submit proposal
+            </button>
+          </div>
+          <TransactionRail tx={tx} />
+        </form>
+        <aside className="marginalia">
+          <div className="margin-section">
+            <h3>{mode} semantics</h3>
+            <p className="entry-statement">
+              {mode === "ADD"
+                ? "Coexist with active lorechain."
+                : mode === "RETCON"
+                  ? "Replace exact active lorechain in this same branch."
+                  : "Diverge from exact inherited ancestor lorechain in this child branch."}
+            </p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+export function ProposalReview({ proposalId }: { proposalId: number }) {
+  const wallet = useWallet();
+  const [p, setP] = useState<ReadResult<Proposal>>();
+  const [world, setWorld] = useState<ReadResult<World>>();
+  const [branches, setBranches] = useState<ReadResult<Branch[]>>();
+  const [related, setRelated] = useState<ReadResult<RelatedLorechain[]>>();
+  const [tx, setTx] = useState<TxState>(IDLE_TX);
+  const refresh = useCallback(async () => {
+    const x = await getProposal(proposalId);
+    setP(x);
+    if (x.kind === "AVAILABLE") {
+      setRelated(await previewRelated(proposalId, 8));
+      const [w, bs] = await Promise.all([getWorld(x.value.world_id), listBranches(x.value.world_id)]);
+      setWorld(w); setBranches(bs);
+    }
+  }, [proposalId]);
+  useEffect(() => {
+    queueMicrotask(() => void refresh());
+  }, [refresh]);
+  async function review() {
+    try {
+      const client = await wallet.getWriteClient();
+      const hash = await writeContract(client, "review_proposal", [
+        BigInt(proposalId),
+      ]);
+      setTx({
+        stage: "finalizing",
+        hash,
+        message:
+          "Independent validators are resolving the bounded lorechain decision.",
+      });
+      await waitForFinalized(client, hash);
+      setTx({
+        stage: "confirming",
+        hash,
+        message:
+          "Execution succeeded; confirming authoritative contract state.",
+      });
+      const confirmed = await getProposal(proposalId);
+      if (confirmed.kind !== "AVAILABLE" || confirmed.value.status === "SUBMITTED")
+        throw new Error("The reviewed proposal was not confirmed in terminal state.");
+      const resulting = confirmed.value.resulting_entry_id > 0
+        ? await getEntry(confirmed.value.resulting_entry_id)
+        : undefined;
+      const superseded = ids(confirmed.value.supersedes_json).map((id) => getEntry(id));
+      const supersededEntries = await Promise.all(superseded);
+      if (supersededEntries.some((entry) => entry.kind !== "AVAILABLE"))
+        throw new Error("Superseded lorechain state could not be confirmed.");
+      const overrides = ids(confirmed.value.branch_overrides_json).map((id) => getEntry(id));
+      const overrideEntries = await Promise.all(overrides);
+      if (overrideEntries.some((entry) => entry.kind !== "AVAILABLE"))
+        throw new Error("Branch override state could not be confirmed.");
+      if (!confirmReviewedProposal(
+        confirmed.value,
+        confirmed.value.mode,
+        resulting?.kind === "AVAILABLE" ? resulting.value : undefined,
+        supersededEntries.map((entry) => entry.kind === "AVAILABLE" ? entry.value : undefined).filter((entry): entry is LorechainEntry => Boolean(entry)),
+        overrideEntries.map((entry) => entry.kind === "AVAILABLE" ? entry.value : undefined).filter((entry): entry is LorechainEntry => Boolean(entry)),
+      ))
+        throw new Error("The reviewed proposal mutation was inconsistent with authoritative state.");
+      setP(confirmed);
+      if (confirmed.value.resulting_entry_id > 0) setRelated(await previewRelated(proposalId, 8));
+      setTx({
+        stage: "success",
+        hash,
+        message: "Authoritative contract state confirmed.",
+      });
+    } catch (e) {
+      setTx({
+        stage: "error",
+        message: formatWriteError(e, tx.hash),
+      });
+    }
+  }
+  async function cancel() {
+    try {
+      const client = await wallet.getWriteClient();
+      const hash = await writeContract(client, "cancel_proposal", [BigInt(proposalId)]);
+      setTx({stage:"finalizing", hash, message:"Waiting for cancellation finality."}); await waitForFinalized(client, hash);
+      setTx({stage:"confirming", hash, message:"Execution succeeded; confirming cancelled proposal."});
+      const confirmed = await getProposal(proposalId);
+      if (confirmed.kind !== "AVAILABLE" || !confirmCancelledProposal(confirmed.value)) throw new Error("Cancelled proposal state was not confirmed in finalized contract state.");
+      setP(confirmed); setTx({stage:"success", hash, message:"Cancellation confirmed in finalized contract state."});
+    } catch (e) { setTx({stage:"error", message:formatWriteError(e, tx.hash)}); }
+  }
+  async function invalidateStale() {
+    try {
+      const client = await wallet.getWriteClient();
+      const hash = await writeContract(client, "invalidate_stale_proposal", [BigInt(proposalId)]);
+      setTx({stage:"finalizing", hash, message:"Waiting for stale invalidation finality."}); await waitForFinalized(client, hash);
+      setTx({stage:"confirming", hash, message:"Execution succeeded; confirming stale terminal state."});
+      const confirmed = await getProposal(proposalId);
+      if (confirmed.kind !== "AVAILABLE" || !confirmStaleProposal(confirmed.value)) throw new Error("Stale proposal state was not confirmed in finalized contract state.");
+      setP(confirmed); setTx({stage:"success", hash, message:"Stale invalidation confirmed in finalized contract state."});
+    } catch (e) { setTx({stage:"error", message:formatWriteError(e, tx.hash)}); }
+  }
+  return (
+    <div className="page-shell">
+      <ReadState result={p}>
+        {(proposal) => (
+          <>
+            <header className="page-heading" data-folio="06">
+              <BackLink href={`/worlds/${proposal.world_id}/lorechain`}>
+                Lorechain ledger
+              </BackLink>
+              <p className="eyebrow">
+                Proposal #{proposal.id} · {proposal.mode}
+              </p>
+              <h1>{proposal.title}</h1>
+            </header>
+            <div className="proposal-layout">
+              <section className="proposal-copy">
+                <StatusMark status={proposal.status} />
+                <blockquote>{proposal.statement}</blockquote>
+                <HashRef label="Evidence" value={proposal.artifact_url} />
+                <HashRef
+                  label="Evidence digest"
+                  value={proposal.artifact_digest}
+                />
+                {proposal.status === "SUBMITTED" ? (
+                  <>
+                    {(() => {
+                      const freshnessKnown = branches?.kind === "AVAILABLE";
+                      const stale = freshnessKnown && proposalLineageIsStale(proposal, branches.value);
+                      const proposer = proposalCancellationEligible(proposal, wallet.address, world?.kind === "AVAILABLE" ? world.value.steward : undefined);
+                      return <>
+                        {!freshnessKnown ? <><p className="field-help">Live branch state unavailable · proposal freshness cannot be established.</p><button className="primary-action" disabled>Run consensus review</button></> : stale ? <><p className="field-help">STALE LINEAGE · This proposal was submitted against an older branch snapshot.</p><button className="primary-action" disabled={!wallet.canWrite} onClick={invalidateStale}>Invalidate stale proposal</button></> : <button className="primary-action" disabled={!wallet.canWrite} onClick={review}>Run consensus review</button>}
+                        <button className="secondary-action" disabled={!wallet.canWrite || !proposer} onClick={cancel}>Cancel proposal</button>
+                        {!proposer && <small className="field-help">Cancellation requires proposer or world steward.</small>}
+                      </>;
+                    })()}
+                  </>
+                ) : (
+                  <div className="decision-block">
+                    <p className="eyebrow">Final decision</p>
+                    <h2>{proposal.decision || proposal.status}</h2>
+                    <p className="entry-statement">{proposal.rationale}</p>
+                    {proposal.resulting_entry_id > 0 && (
+                      <Link
+                        className="primary-action"
+                        to={`/receipts/${proposal.id}`}
+                      >
+                        Decision receipt
+                      </Link>
+                    )}
+                  </div>
+                )}
+                <TransactionRail tx={tx} />
+              </section>
+              <aside className="marginalia">
+                <div className="margin-card">
+                  <h3>Retrieved active lorechain</h3>
+                  <ReadState result={related}>
+                    {(items) =>
+                      items.length ? (
+                        items.map((r) => (
+                          <article className="related-card" key={r.entry_id}>
+                            <strong>
+                              #{r.entry_id} · {r.title}
+                            </strong>
+                            <p>{r.statement}</p>
+                            <div className="related-distance">
+                              branch {r.branch_id} · {r.retrieval_source === "VECDB" ? `VecDB · distance ${r.distance}` : `${r.retrieval_source === "ENTITY_SCOPE" ? "Entity" : "Lineage"} fallback · deterministic`}
+                            </div>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="field-help">
+                          No eligible memory retrieved.
+                        </p>
+                      )
+                    }
+                  </ReadState>
+                </div>
+                {proposal.status !== "SUBMITTED" && (
+                  <div className="margin-card">
+                    <LedgerRule
+                      label="Related"
+                      value={
+                        ids(proposal.related_ids_json).join(", ") || "none"
+                      }
+                    />
+                    <LedgerRule
+                      label="Supersedes"
+                      value={ids(proposal.supersedes_json).join(", ") || "none"}
+                    />
+                    <LedgerRule
+                      label="Branch overrides"
+                      value={
+                        ids(proposal.branch_overrides_json).join(", ") || "none"
+                      }
+                    />
+                  </div>
+                )}
+              </aside>
+            </div>
+          </>
+        )}
+      </ReadState>
+    </div>
+  );
+}
+
+export function DecisionReceipt({ proposalId }: { proposalId: number }) {
+  const [p, setP] = useState<ReadResult<Proposal>>();
+  const [e, setE] = useState<ReadResult<LorechainEntry>>();
+  useEffect(() => {
+    void getProposal(proposalId).then((x) => {
+      setP(x);
+      if (x.kind === "AVAILABLE" && x.value.resulting_entry_id)
+        void getEntry(x.value.resulting_entry_id).then(setE);
+    });
+  }, [proposalId]);
+  return (
+    <div className="page-shell">
+      <ReadState result={p}>
+        {(proposal) => (
+          <article className="receipt-sheet">
+            <p className="eyebrow">
+              On-chain decision · proposal #{proposal.id}
+            </p>
+            <h1>{proposal.title}</h1>
+            <StatusMark status={proposal.status} />
+            <blockquote className="receipt-quote">
+              {proposal.statement}
+            </blockquote>
+            <div className="receipt-grid">
+              <div className="receipt-row"><span>Contract</span><strong>{CONTRACT_ADDRESS || "not configured"}</strong></div>
+              <div className="receipt-row"><span>Network</span><strong>{CHAIN_NAME} · chain {CHAIN_ID}</strong></div>
+              <div className="receipt-row"><span>World / branch</span><strong>{proposal.world_id} / {proposal.branch_id}</strong></div>
+              <div className="receipt-row">
+                <span>Decision</span>
+                <strong>{proposal.decision || proposal.status}</strong>
+              </div>
+              <div className="receipt-row">
+                <span>Mode</span>
+                <strong>{proposal.mode}</strong>
+              </div>
+              <div className="receipt-row">
+                <span>Base branch version</span>
+                <strong>{proposal.base_branch_version}</strong>
+              </div>
+              <div className="receipt-row"><span>Lineage snapshot</span><strong>{proposal.lineage_snapshot_json}</strong></div>
+              <div className="receipt-row"><span>Artifact</span><strong>{proposal.artifact_url || "none"}</strong></div>
+              <div className="receipt-row"><span>Artifact SHA-256</span><strong>{proposal.artifact_digest || "none"}</strong></div>
+              <div className="receipt-row"><span>Entity keys</span><strong>{keys(proposal.entity_keys_json).join(", ") || "generic"}</strong></div>
+              <div className="receipt-row"><span>Time anchor</span><strong>{proposal.time_anchor || "none"}</strong></div>
+              <div className="receipt-row">
+                <span>Resulting entry</span>
+                <strong>{proposal.resulting_entry_id || "none"}</strong>
+              </div>
+              <div className="receipt-row">
+                <span>Related IDs</span>
+                <strong>
+                  {ids(proposal.related_ids_json).join(", ") || "none"}
+                </strong>
+              </div>
+              <div className="receipt-row">
+                <span>Supersedes</span>
+                <strong>
+                  {ids(proposal.supersedes_json).join(", ") || "none"}
+                </strong>
+              </div>
+              <div className="receipt-row">
+                <span>Branch overrides</span>
+                <strong>
+                  {ids(proposal.branch_overrides_json).join(", ") || "none"}
+                </strong>
+              </div>
+              <div className="receipt-row"><span>Duplicate of</span><strong>{proposal.duplicate_of || "none"}</strong></div>
+              <div className="receipt-row"><span>Rationale</span><strong>{proposal.rationale || "none"}</strong></div>
+              <div className="receipt-row"><span>Evidence summary</span><strong>{proposal.evidence_summary || "none"}</strong></div>
+              <div className="receipt-row"><span>Submitted / reviewed</span><strong>{proposal.submitted_at} / {proposal.reviewed_at || "pending"}</strong></div>
+            </div>
+            {e?.kind === "AVAILABLE" && (
+              <section className="receipt-section">
+                <h2>{e.value.title}</h2>
+                <p className="entry-statement">{e.value.statement}</p>
+                <p className="field-help">Resulting entry #{e.value.id} · {e.value.status} · vector distance is retrieval metadata, not confidence.</p>
+              </section>
+            )}
+            <section className="receipt-section"><h2>Transaction / session proof</h2><p className="field-help">Transaction hashes and finality are shown only when captured in this browser session; the lorechain contract receipt above does not invent them.</p></section>
+            {CONTRACT_ADDRESS && (
+              <a
+                className="secondary-action"
+                href={explorerAddressUrl(CONTRACT_ADDRESS)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Contract explorer
+              </a>
+            )}
+          </article>
+        )}
+      </ReadState>
+    </div>
+  );
+}
+
+export const RECALL_SNAPSHOT_KEY = "lorechain.recall";
+const MAX_RECALL_HISTORY = 20;
+type RecallRun = { at: string; world: number; worldName?: string; branch: number; branchName?: string; query: string; outcome: ReadResult<RelatedLorechain[]> };
+type RecallSnapshot = { world?: number; branch?: number; query?: string; history?: RecallRun[] };
+export function readRecallSnapshot(): RecallSnapshot | undefined {
+  try {
+    const raw = window.localStorage.getItem(RECALL_SNAPSHOT_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const id = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : undefined);
+    const history = Array.isArray(parsed.history)
+      ? (parsed.history.filter((r) => {
+          if (!r || typeof r !== "object") return false;
+          const run = r as RecallRun;
+          return typeof run.at === "string" && typeof run.world === "number" && typeof run.branch === "number" && typeof run.query === "string" && run.outcome && typeof run.outcome === "object" && typeof run.outcome.kind === "string";
+        }) as RecallRun[]).slice(0, MAX_RECALL_HISTORY)
+      : undefined;
+    return { world: id(parsed.world), branch: id(parsed.branch), query: typeof parsed.query === "string" ? parsed.query : undefined, history };
+  } catch {
+    return undefined;
+  }
+}
+
+export function SemanticSearch({ initialWorld }: { initialWorld?: number }) {
+  const [snapshot] = useState(readRecallSnapshot);
+  const [worlds, setWorlds] = useState<ReadResult<World[]>>();
+  const [branches, setBranches] = useState<ReadResult<Branch[]>>();
+  const [world, setWorld] = useState(initialWorld ?? snapshot?.world);
+  const [branch, setBranch] = useState<number | undefined>(snapshot?.branch);
+  const [q, setQ] = useState(snapshot?.query ?? "");
+  const [history, setHistory] = useState<RecallRun[]>(() => snapshot?.history ?? []);
+  useEffect(() => {
+    void listWorlds().then((r) => {
+      setWorlds(r);
+      if (r.kind === "AVAILABLE" && r.value.length)
+        setWorld((x) => (x && r.value.some((w) => w.id === x) ? x : r.value[0].id));
+    });
+  }, []);
+  useEffect(() => {
+    if (world)
+      void listBranches(world).then((r) => {
+        setBranches(r);
+        if (r.kind === "AVAILABLE") {
+          const firstEligible = r.value.find((candidate) => effectiveBranchActivity(candidate.id, r.value));
+          setBranch((current) =>
+            current && r.value.some((b) => b.id === current && effectiveBranchActivity(b.id, r.value)) ? current : firstEligible?.id,
+          );
+        }
+      });
+  }, [world]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        RECALL_SNAPSHOT_KEY,
+        JSON.stringify({ world, branch, query: q, history: history.length ? history : undefined }),
+      );
+    } catch { /* storage may be unavailable */ }
+  }, [world, branch, q, history]);
+  const [pending, setPending] = useState(false);
+  async function run(e: React.FormEvent) {
+    e.preventDefault();
+    if (pending || !world || !branch || !q.trim()) return;
+    setPending(true);
+    try {
+      const outcome = await searchLorechain(world, branch, q.trim(), 8);
+      setHistory((current) => [{
+        at: new Date().toISOString(),
+        world,
+        worldName: worlds?.kind === "AVAILABLE" ? worlds.value.find((w) => w.id === world)?.name : undefined,
+        branch,
+        branchName: branches?.kind === "AVAILABLE" ? branches.value.find((b) => b.id === branch)?.name : undefined,
+        query: q.trim(),
+        outcome,
+      }, ...current].slice(0, MAX_RECALL_HISTORY));
+    } finally {
+      setPending(false);
+    }
+  }
+  function clearHistory() {
+    setHistory([]);
+  }
+  return (
+    <div className="page-shell">
+      <header className="page-heading" data-folio="07">
+        <p className="eyebrow">Semantic recall</p>
+        <h1>Search by meaning, not wording.</h1>
+        <p className="deck">
+          Raw vector distance is relatedness only, never confidence.
+        </p>
+      </header>
+      <div className="search-stage">
+        <form className="search-controls" onSubmit={run}>
+          <div className="field">
+            <label>World</label>
+            <select
+              value={world ?? ""}
+              onChange={(e) => setWorld(Number(e.target.value))}
+            >
+              {worlds?.kind === "AVAILABLE" && worlds.value.length ? (
+                worlds.value.map((w) => (
+                  <option value={w.id} key={w.id}>
+                    {w.name}
+                  </option>
+                ))
+              ) : (
+                <option value="">No worlds on chain yet</option>
+              )}
+            </select>
+          </div>
+          <div className="field">
+            <label>Branch</label>
+            <select
+              value={branch ?? ""}
+              onChange={(e) => setBranch(Number(e.target.value))}
+            >
+              {branches?.kind === "AVAILABLE" &&
+                branches.value.filter((b) => effectiveBranchActivity(b.id, branches.value)).map((b) => (
+                  <option value={b.id} key={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              {branches?.kind === "AVAILABLE" && !branches.value.some((b) => effectiveBranchActivity(b.id, branches.value)) && <option value="">No eligible active lineage</option>}
+              {branches?.kind !== "AVAILABLE" && <option value="">No branch state yet</option>}
+            </select>
+          </div>
+          <div className="field">
+            <label>Meaning to recall</label>
+            <textarea value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <button className="primary-action" disabled={pending}>
+            {pending ? "Recalling…" : "Retrieve lorechain"}
+          </button>
+          <p className="field-help">
+            No server index exists; this calls contract VecDB directly. Each
+            recall embeds the query on-chain and takes several seconds.
+          </p>
+        </form>
+        <section className="search-results">
+          {pending && (
+            <p className="search-idle">
+              <span className="ink-pulse" /> Recalling from the contract; the
+              query embedding runs on StudioNet and takes several seconds.
+            </p>
+          )}
+          {history.length ? (
+            <>
+              <div className="recall-toolbar">
+                <span>
+                  {history.length} recall{history.length === 1 ? "" : "s"} kept in this browser
+                </span>
+                <button type="button" className="text-action" onClick={clearHistory}>
+                  Clear history
+                </button>
+              </div>
+              {history.map((run) => (
+                <article className="recall-run" key={run.at}>
+                  <header className="recall-run-head">
+                    <p className="recall-run-query">“{run.query}”</p>
+                    <small>
+                      {run.worldName ?? `world ${run.world}`} · {run.branchName ?? `branch ${run.branch}`} · {new Date(run.at).toLocaleTimeString()}
+                    </small>
+                  </header>
+                  {run.outcome.kind === "AVAILABLE" ? (
+                    run.outcome.value.length ? (
+                      run.outcome.value.map((r) => (
+                        <div className="search-hit" key={r.entry_id}>
+                          <div className="distance">
+                            distance
+                            <br />
+                            {r.distance}
+                          </div>
+                          <div>
+                            <h3>
+                              #{r.entry_id} · {r.title}
+                            </h3>
+                            <small>branch {r.branch_id}</small>
+                          </div>
+                          <p>{r.statement}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="search-idle">
+                        No accepted lorechain matched this meaning in the active
+                        lineage.
+                      </p>
+                    )
+                  ) : run.outcome.kind === "NOT_FOUND" ? (
+                    <p className="search-idle">Record not found.</p>
+                  ) : (
+                    <p className="search-idle" role="alert">
+                      Recall unavailable: {run.outcome.reason}
+                    </p>
+                  )}
+                </article>
+              ))}
+            </>
+          ) : !pending ? (
+            <p className="search-idle">
+              No recall has been run yet. Enter a meaning and retrieve related
+              lorechain; every recall stays listed here (browser-local only).
+              Vector distance is relatedness only, never confidence.
+            </p>
+          ) : null}
+        </section>
+      </div>
+    </div>
+  );
+}
