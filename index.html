@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LoreChain — Consensus story bible</title>
+    <meta
+      name="description"
+      content="Versioned fictional lorechain with semantic memory and GenLayer consensus."
+    />
+    <script>
+      (function () {
+        var stored = null;
+        try {
+          stored = window.localStorage.getItem("lorechain.theme");
+        } catch (e) {
+          stored = null;
+        }
+        var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme =
+          stored === "dark" || stored === "light" ? stored : prefersDark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/frontend/app/main.tsx"></script>
+  </body>
+</html>
