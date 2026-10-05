@@ -80,7 +80,7 @@ npm run dev
 Set the deployed contract address:
 
 ```bash
-NEXT_PUBLIC_LORECHAIN_CONTRACT=0x...
+VITE_LORECHAIN_CONTRACT=0x...
 ```
 
 The frontend intentionally does not fall back to fake data if the address or network is unavailable.
@@ -112,7 +112,7 @@ Official Studionet deployment of the current LoreChain source: contract `0x8313b
 
 Team-review acceptance hardening adds bounded deterministic entity- and lineage-scoped fallback candidates after global VecDB KNN filtering. `MAX_SCOPED_FALLBACK_SCAN=16` and `MAX_ENTITY_FALLBACK_SCAN=16`; candidates remain world/lineage/status/supersession/shadow checked, deduplicated, capped by `MAX_RELATED`, and settlement-capable. Related results expose `VECDB`, `ENTITY_SCOPE`, or `LINEAGE_SCOPE`; distance is retrieval metadata, never confidence. The adversarial starvation Direct Mode test proves unrelated global neighbors cannot reduce eligible scoped lorechain to zero.
 
-The submitted frontend exposes steward-only editor grants/revokes, branch activation, proposal cancellation, and stale-proposal invalidation. Each uses FINALIZED + GenVM SUCCESS + exact LATEST_FINAL state confirmation. Vercel remains [lorechain.vercel.app](https://lorechain.vercel.app), but the owner must set `NEXT_PUBLIC_LORECHAIN_CONTRACT=0x8313bB950e341c573075c7DBeE500dd7d28f206f` and redeploy before it represents this deployment.
+The submitted frontend exposes steward-only editor grants/revokes, branch activation, proposal cancellation, and stale-proposal invalidation. Each uses FINALIZED + GenVM SUCCESS + exact LATEST_FINAL state confirmation. Vercel remains [lorechain.vercel.app](https://lorechain.vercel.app), but the owner must set `VITE_LORECHAIN_CONTRACT=0x8313bB950e341c573075c7DBeE500dd7d28f206f` and redeploy before it represents this deployment.
 
 Current GenLayer CLI documentation uses:
 
@@ -139,7 +139,7 @@ The current contract-owned VecDB API exposes global `knn(vector, k)` without met
 
 For the current operational deployment:
 
-1. set `NEXT_PUBLIC_LORECHAIN_CONTRACT` to the verified address;
+1. set `VITE_LORECHAIN_CONTRACT` to the verified address;
 2. run `npm run verify:schema` and `npm run verify:studionet`;
 3. keep deployment source parity green with `npm run verify:deployment-source`;
 4. consult `DEPLOYMENT.json` for the exact public transaction evidence.

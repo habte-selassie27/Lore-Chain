@@ -10,7 +10,7 @@
 - **Frontend:** complete route surface implemented with direct live contract reads/writes, injected wallet + `personal_sign` sign-in gate, wrong-network gate, FINALIZED + GenVM execution verification and editorial story-bible UI.
 - **GitHub verification:** preflight PASS, source tests 22 passed on the Python 3.12 venv, frontend Vitest 44 passed (9 files), TypeScript PASS, ESLint 0/0, Vite build PASS, `npm audit:prod` clean, and `verify:deployment-source` PASS for digest `149372c2538325eec32f421447156eda7a1edff89e9287d1891d03e8d490cb26`. Direct Mode fixture tests remain unproven in this Linux workspace (harness idle-hangs); `python` is not on PATH locally (use `.venv`).
 - **StudioNet:** official deployment `0x8313bB950e341c573075c7DBeE500dd7d28f206f`, deploy tx `0x55f26b13b5ffd594d50a427eecb0c6b5ec76ffd64717d272d8dda31a28fc741e`, deployer `0x5B3661C576c7001e6d6279C67F3779705d334c89` — FINALIZED, GenVM SUCCESS, EVM `0x1`, code byte-identical, schema PASS, LATEST_FINAL reads PASS (fresh contract).
-- **Vercel:** historical frontend evidence exists at https://lorechain.vercel.app; owner must set `NEXT_PUBLIC_LORECHAIN_CONTRACT=0x8313bB950e341c573075c7DBeE500dd7d28f206f` and redeploy — hosted parity is NOT PROVEN here.
+- **Vercel:** historical frontend evidence exists at https://lorechain.vercel.app; owner must set `VITE_LORECHAIN_CONTRACT=0x8313bB950e341c573075c7DBeE500dd7d28f206f` and redeploy — hosted parity is NOT PROVEN here.
 - **Next exact action:** run the acceptance lifecycle against `0x8313bB95...` recording every transaction with authoritative LATEST_FINAL state re-reads, then prove a hosted wallet write and point Vercel at the address.
 
 ## 2026-10-05 — repository-wide entry-term rename to lorechain
@@ -20,6 +20,12 @@
 - Intentionally untouched: `contracts/lorechain.py` (already zero occurrences; byte-parity with deployed source), every quoted contract-method string (none contained the term), `DEPLOYMENT.json` (hashed deployment evidence, kept verbatim), and third-party RPC code inside the bundled viem output.
 - Hand-curated the handful of self-referential historical log lines (contract-rename and product-rename sections) so they stay truthful after the mechanical substitution.
 - Checks: `npx tsc --noEmit` PASS, `npx eslint .` 0/0, Vitest 35 passed (7 files), `vite build` PASS, `python3 scripts/preflight.py` PASS, `npm run verify:deployment-source` PASS (SHA parity `149372c2…`), source tests 8/8 run directly (system-pytest collection still blocked in this workspace).
+
+## 2026-10-05 — env vars renamed to Vite-native `VITE_*`
+
+- Owner directed dropping the Next-era prefix: `NEXT_PUBLIC_LORECHAIN_CONTRACT` → `VITE_LORECHAIN_CONTRACT`, `NEXT_PUBLIC_GENLAYER_ENDPOINT` → `VITE_GENLAYER_ENDPOINT` across `lib/genlayer/config.ts`, `vite-env.d.ts`, `.env.example`, `.env.local`, both StudioNet scripts, frontend empty-state text, `read-path.test.ts`, `home-page.test.ts`, README, trd.md and memory.md. `vite.config.ts` `envPrefix` removed (Vite default `VITE_` only — nothing else leaks to the client bundle).
+- The migration-era decision to keep `NEXT_PUBLIC_*` via `envPrefix` is superseded; Vercel project env must be renamed accordingly (owner action in the dashboard) before the next production build, otherwise the hosted app shows the contract-not-configured state.
+- Checks: `tsc --noEmit` PASS, `eslint .` 0/0, Vitest 44 passed (9 files), `vite build` PASS, 8/8 frontend-source python tests PASS.
 
 ## 2026-10-05 — repository published to GitHub
 
@@ -123,7 +129,7 @@
 
 - Screenshot-driven pass over the two weak surfaces (world desk without a contract, semantic recall), staying inside the `ui/ux.md` story-bible system.
 - Masthead: live stamp pushed to the right edge of the brand cell, wallet utility uses `space-between` so the network caption anchors to its rule, duplicate 2px rule removed (`border-right` dropped from `.masthead-nav`), nav/wordmark/index/button hover states added, global `:focus-visible` outline in vermilion.
-- Empty states: `.empty-state` now fills the main row (`.site-shell main` is a grid row), folio marker gained an ink rule, copy block gained a top rule, and `NEXT_PUBLIC_LORECHAIN_CONTRACT` renders as a bordered code chip; headline capped at 920px.
+- Empty states: `.empty-state` now fills the main row (`.site-shell main` is a grid row), folio marker gained an ink rule, copy block gained a top rule, and `VITE_LORECHAIN_CONTRACT` renders as a bordered code chip; headline capped at 920px.
 - Search: controls panel uses `--wash-desk`, results panel uses `--wash-manuscript`, primary action is full-width in the rail, focus turns field borders vermilion, and `SemanticSearch` now shows a ruled idle note before the first recall plus a "no match" note; world/branch selects show honest fallback options instead of rendering empty.
 - Verified with headless Chrome screenshots of `/` and `/search` in both themes (dark by default, light by temporary forced fallback that was reverted in `index.html`), pixel-probed panel backgrounds, then `vitest` 29 passed, scoped `eslint` 0 errors on the touched files, `vite build` PASS, `python3 scripts/preflight.py` PASS, all 8 `test_frontend_source.py` tests PASS.
 - **Concurrent-edit warning:** at 16:09 `lib/wallet-session.ts` and `frontend/components/wallet-provider.tsx` were modified by a signature persistence edit, not by this work unit. That edit was completed later in the wallet sign-in work unit below; typecheck, lint, Vitest and build now pass.
@@ -159,7 +165,7 @@
 - Fresh acceptance deployment: source commit `d3548daa7003f2cc18d808dbf56ce0f9c2b63871`, normalized source SHA-256 `d0ef35996494275ad870ada3183daf2dafac2c3623735b2396dadb98a1e936a6`, contract `0x91eE572dB3981b60A72Ec29802af35eF86EFf22A`, deployment tx `0xc9e14e5141dfa2fc9db8feb4d2629787f22cb4babb75e3a8eebcfe00c0ee08b5`, deployer `0xb29Ead15B1E8A2420faE84de974088f67a15ccC2`. Receipt is FINALIZED, leader GenVM SUCCESS, and the independent EVM receipt is `0x1`.
 - `_related()` now performs global top-32 KNN retrieval followed by bounded entity-index and lineage-index fallback (`MAX_ENTITY_FALLBACK_SCAN=16`, `MAX_SCOPED_FALLBACK_SCAN=16`). Fallback candidates are fully revalidated, deduplicated, capped, and frozen into settlement context. Direct Mode starvation coverage proves an eligible World A entry remains settlement-capable when global KNN contains only unrelated World B neighbors.
 - The submitted frontend now visibly exposes `set_editor`, `set_branch_active`, `cancel_proposal`, and `invalidate_stale_proposal`, with steward/submitter/stale eligibility and exact FINALIZED + GenVM SUCCESS + LATEST_FINAL confirmation.
-- The old `0xCb4E...` deployment remains historical. Vercel is still at `https://lorechain.vercel.app`, but owner action is required to set `NEXT_PUBLIC_LORECHAIN_CONTRACT=0x91eE572dB3981b60A72Ec29802af35eF86EFf22A` and redeploy; hosted proof against the new address is therefore NOT PROVEN here.
+- The old `0xCb4E...` deployment remains historical. Vercel is still at `https://lorechain.vercel.app`, but owner action is required to set `VITE_LORECHAIN_CONTRACT=0x91eE572dB3981b60A72Ec29802af35eF86EFf22A` and redeploy; hosted proof against the new address is therefore NOT PROVEN here.
 
 ## 2026-08-27 — hosted production evidence closure
 
@@ -200,7 +206,7 @@
 - Contract address: `0xE386595d8Eb891e07597a6BAEad32c27E749FEc9`.
 - GenLayer receipt: `FINALIZED`; leader GenVM execution `SUCCESS`; stdout/stderr empty; no execution error.
 - Independent StudioNet RPC receipt returned `status: 0x1`.
-- Next exact action: set `NEXT_PUBLIC_LORECHAIN_CONTRACT` to the deployed address, run schema/live-read checks, then execute and record every real lifecycle transaction with authoritative state re-reads.
+- Next exact action: set `VITE_LORECHAIN_CONTRACT` to the deployed address, run schema/live-read checks, then execute and record every real lifecycle transaction with authoritative state re-reads.
 
 ## 2026-08-26 — Deployment registration blocker
 
@@ -308,7 +314,7 @@ At the original implementation checkpoint, StudioNet deployment, schema parity a
 4. Deploy `contracts/lorechain.py` to StudioNet.
 5. Verify deployment transaction reaches FINALIZED and actual GenVM execution is successful.
 6. Record contract address, deploy tx, deployer and frozen source commit in `DEPLOYMENT.json`, `memory.md`, `handoff.md`.
-7. Set `NEXT_PUBLIC_LORECHAIN_CONTRACT` and run `npm run verify:schema`.
+7. Set `VITE_LORECHAIN_CONTRACT` and run `npm run verify:schema`.
 8. Execute real lifecycle proof: create world → create child branch → establish accepted lorechain → compatible proposal → same-branch retcon → branch-only divergence; exercise an insufficient/fail-closed case where practical.
 9. For every write, record transaction hash, FINALIZED status, actual GenVM execution result and authoritative re-read.
 10. Deploy the verified commit to Vercel with the StudioNet contract env value.

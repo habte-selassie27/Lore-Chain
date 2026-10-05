@@ -135,7 +135,7 @@ export function HomeLanding() {
               </ReadState>
             ) : (
               <p className="field-help">
-                Contract not configured. Set NEXT_PUBLIC_LORECHAIN_CONTRACT to
+                Contract not configured. Set VITE_LORECHAIN_CONTRACT to
                 read the live ledger.
               </p>
             )}

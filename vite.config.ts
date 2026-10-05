@@ -11,7 +11,6 @@ const securityHeaders = {
 
 export default defineConfig({
   plugins: [react()],
-  envPrefix: ["VITE_", "NEXT_PUBLIC_"],
   resolve: {alias: {"@": fileURLToPath(new URL("./", import.meta.url))}},
   server: {headers: securityHeaders},
   preview: {headers: securityHeaders},

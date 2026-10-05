@@ -181,7 +181,7 @@ export function WorldDesk() {
       >
         <p>
           No fallback dataset exists. Configure{" "}
-          <code>NEXT_PUBLIC_LORECHAIN_CONTRACT</code> after the StudioNet
+          <code>VITE_LORECHAIN_CONTRACT</code> after the StudioNet
           deployment.
         </p>
       </EmptyPage>

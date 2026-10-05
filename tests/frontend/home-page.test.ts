@@ -27,7 +27,7 @@ describe("home landing page", () => {
 
   it("gates the live ledger on a configured contract", () => {
     expect(homeSource).toContain("CONTRACT_ADDRESS");
-    expect(homeSource).toContain("NEXT_PUBLIC_LORECHAIN_CONTRACT");
+    expect(homeSource).toContain("VITE_LORECHAIN_CONTRACT");
   });
 
   it("mounts a decorative, lazy-loaded, motion-safe Three.js hero", () => {

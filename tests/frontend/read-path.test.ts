@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.hoisted(() => { (import.meta.env as Record<string, string | undefined>).NEXT_PUBLIC_LORECHAIN_CONTRACT = "0xCb4E8279Eff17c734c3eA2e32657691610b3467A"; return undefined; });
+vi.hoisted(() => { (import.meta.env as Record<string, string | undefined>).VITE_LORECHAIN_CONTRACT = "0xCb4E8279Eff17c734c3eA2e32657691610b3467A"; return undefined; });
 const readContract = vi.hoisted(() => vi.fn());
 const createClient = vi.hoisted(() => vi.fn(() => ({ readContract })));
 const createAccount = vi.hoisted(() => vi.fn(() => { throw new Error("public reads must not create accounts"); }));

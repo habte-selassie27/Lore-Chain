@@ -410,7 +410,7 @@ Release proof requires more than source tests.
 
 After StudioNet deployment:
 
-- set `NEXT_PUBLIC_LORECHAIN_CONTRACT` on Vercel;
+- set `VITE_LORECHAIN_CONTRACT` on Vercel;
 - build/deploy the current verified commit;
 - confirm public reads without wallet;
 - connect an injected wallet explicitly;
