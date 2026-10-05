@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { CHAIN_ID, CHAIN_NAME, CONTRACT_ADDRESS, explorerAddressUrl } from "@/lib/genlayer/config";
+import { clearRecallRuns, ensureRecallDbSession, loadRecallRuns, recallDbConfigured, saveRecallRun } from "@/lib/supabase/recall-store";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getEntry,
   getProposal,
@@ -1371,6 +1373,7 @@ export function readRecallSnapshot(): RecallSnapshot | undefined {
 }
 
 export function SemanticSearch({ initialWorld }: { initialWorld?: number }) {
+  const wallet = useWallet();
   const [snapshot] = useState(readRecallSnapshot);
   const [worlds, setWorlds] = useState<ReadResult<World[]>>();
   const [branches, setBranches] = useState<ReadResult<Branch[]>>();
@@ -1378,6 +1381,39 @@ export function SemanticSearch({ initialWorld }: { initialWorld?: number }) {
   const [branch, setBranch] = useState<number | undefined>(snapshot?.branch);
   const [q, setQ] = useState(snapshot?.query ?? "");
   const [history, setHistory] = useState<RecallRun[]>(() => snapshot?.history ?? []);
+  const [db, setDb] = useState<SupabaseClient | undefined>();
+  useEffect(() => {
+    if (!recallDbConfigured || !wallet.address || !wallet.signature) return;
+    let cancelled = false;
+    void ensureRecallDbSession().then((c) => {
+      if (!cancelled) setDb(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [wallet.address, wallet.signature]);
+  const activeDb = wallet.address && wallet.signature ? db : undefined;
+  useEffect(() => {
+    if (!activeDb) return;
+    let cancelled = false;
+    void loadRecallRuns(activeDb, MAX_RECALL_HISTORY).then((runs) => {
+      if (cancelled || !runs || !runs.length) return;
+      setHistory(
+        runs.map((r) => ({
+          at: r.created_at ?? new Date().toISOString(),
+          world: r.world_id,
+          worldName: r.world_name ?? undefined,
+          branch: r.branch_id,
+          branchName: r.branch_name ?? undefined,
+          query: r.query,
+          outcome: r.outcome,
+        })),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDb]);
   useEffect(() => {
     void listWorlds().then((r) => {
       setWorlds(r);
@@ -1412,7 +1448,7 @@ export function SemanticSearch({ initialWorld }: { initialWorld?: number }) {
     setPending(true);
     try {
       const outcome = await searchLorechain(world, branch, q.trim(), 8);
-      setHistory((current) => [{
+      const entry: RecallRun = {
         at: new Date().toISOString(),
         world,
         worldName: worlds?.kind === "AVAILABLE" ? worlds.value.find((w) => w.id === world)?.name : undefined,
@@ -1420,13 +1456,25 @@ export function SemanticSearch({ initialWorld }: { initialWorld?: number }) {
         branchName: branches?.kind === "AVAILABLE" ? branches.value.find((b) => b.id === branch)?.name : undefined,
         query: q.trim(),
         outcome,
-      }, ...current].slice(0, MAX_RECALL_HISTORY));
+      };
+      setHistory((current) => [entry, ...current].slice(0, MAX_RECALL_HISTORY));
+      if (activeDb && wallet.address)
+        void saveRecallRun(activeDb, {
+          wallet_address: wallet.address.toLowerCase(),
+          world_id: entry.world,
+          world_name: entry.worldName,
+          branch_id: entry.branch,
+          branch_name: entry.branchName,
+          query: entry.query,
+          outcome: entry.outcome,
+        });
     } finally {
       setPending(false);
     }
   }
   function clearHistory() {
     setHistory([]);
+    if (activeDb) void clearRecallRuns(activeDb);
   }
   return (
     <div className="page-shell">
@@ -1495,7 +1543,7 @@ export function SemanticSearch({ initialWorld }: { initialWorld?: number }) {
             <>
               <div className="recall-toolbar">
                 <span>
-                  {history.length} recall{history.length === 1 ? "" : "s"} kept in this browser
+                  {history.length} recall{history.length === 1 ? "" : "s"} {activeDb ? "synced to your account" : "kept in this browser"}
                 </span>
                 <button type="button" className="text-action" onClick={clearHistory}>
                   Clear history

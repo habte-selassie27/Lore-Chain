@@ -21,6 +21,14 @@
 - Hand-curated the handful of self-referential historical log lines (contract-rename and product-rename sections) so they stay truthful after the mechanical substitution.
 - Checks: `npx tsc --noEmit` PASS, `npx eslint .` 0/0, Vitest 35 passed (7 files), `vite build` PASS, `python3 scripts/preflight.py` PASS, `npm run verify:deployment-source` PASS (SHA parity `149372c2…`), source tests 8/8 run directly (system-pytest collection still blocked in this workspace).
 
+## 2026-10-05 — recall history syncs to Supabase per wallet (owner-approved exception)
+
+- Owner chose Supabase for recall-history persistence after the on-chain option was rejected. Implemented `lib/supabase/recall-store.ts`: env-gated client (`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`), EIP-4361 `signInWithWeb3` (auto-detects the injected wallet), and save/load/clear for table `recall_runs`. `supabase/schema.sql` creates the table with RLS (`auth.uid() = user_id` on select/insert/delete) and a `(user_id, created_at desc)` index.
+- `SemanticSearch` activates the DB only when the app wallet is signed in (`activeDb = wallet.address && wallet.signature ? db : undefined` — no sync setState in effects), loads history from the DB on session, appends runs optimistically (insert is fire-and-forget), clears remotely on Clear history, and labels the toolbar honestly: "synced to your account" vs "kept in this browser". localStorage remains the offline cache and the full fallback when env/auth is missing — the app works fully without Supabase.
+- Invariants/docs updated for the approved exception: `AGENTS.md` no-backend bullet now carries the dated Supabase exception, `test_no_backend` no longer forbids the supabase package, `architecture.md` boundary section notes the exception, README gained the setup section, `memory.md` decision superseded (localStorage-only → per-wallet Supabase + localStorage fallback). Canonical truth remains the contract; the DB is never read for canonical state.
+- Env plumbing: `vite-env.d.ts` types and `.env.example` stubs added. Setup requires running `supabase/schema.sql` and enabling Supabase Auth → Web3 → Ethereum; otherwise the feature silently stays browser-local.
+- Checks: `tsc --noEmit` PASS, `eslint .` 0/0, Vitest 94 passed, `vite build` PASS, 8/8 frontend-source python tests PASS.
+
 ## 2026-10-05 — env vars renamed to Vite-native `VITE_*`
 
 - Owner directed dropping the Next-era prefix: `NEXT_PUBLIC_LORECHAIN_CONTRACT` → `VITE_LORECHAIN_CONTRACT`, `NEXT_PUBLIC_GENLAYER_ENDPOINT` → `VITE_GENLAYER_ENDPOINT` across `lib/genlayer/config.ts`, `vite-env.d.ts`, `.env.example`, `.env.local`, both StudioNet scripts, frontend empty-state text, `read-path.test.ts`, `home-page.test.ts`, README, trd.md and memory.md. `vite.config.ts` `envPrefix` removed (Vite default `VITE_` only — nothing else leaks to the client bundle).

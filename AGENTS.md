@@ -23,7 +23,7 @@ For every meaningful work unit: read relevant docs, make the smallest coherent c
 - Injected wallet only for browser writes; no generated/local/server signer.
 - FINALIZED is not success until GenVM leader execution is explicitly successful.
 - Product architecture is **GenLayer Intelligent Contract + browser frontend only**.
-- No project backend, application DB, custom indexer, project API service, worker or queue.
+- No project backend, application DB, custom indexer, project API service, worker or queue. Owner-approved exception (2026-10-05): semantic-recall history may persist in Supabase behind wallet-scoped RLS as a convenience cache; it is never canonical state and the app works fully without it.
 - Contract is the authoritative application source of truth.
 - No mock/fixture application-data mode and no fake fallback state.
 - VecDB retrieves related lorechain; it never decides truth or authorization by itself.

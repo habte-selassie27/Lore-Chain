@@ -137,7 +137,7 @@ The architecture deliberately separates **selection** from **judgment**. A memor
 
 ## 9. Direct frontend/contract boundary
 
-There is no project API or service boundary.
+There is no project API or service boundary. The single approved exception is semantic-recall history: it may sync per wallet in a Supabase table behind row-level security (EIP-4361 web3 sign-in) as a convenience cache, with browser `localStorage` as fallback. It is never read for canonical state, never influences consensus, and the application works fully without it.
 
 ```text
 React page/component

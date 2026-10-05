@@ -3,7 +3,7 @@ ROOT=Path(__file__).resolve().parents[2]
 def sources():return "\n".join(p.read_text(errors="ignore") for ext in("*.ts","*.tsx") for p in ROOT.rglob(ext) if "node_modules" not in p.parts)
 def test_no_backend():
  assert not(ROOT/"frontend/app/api").exists() and not(ROOT/"pages/api").exists();package=(ROOT/"package.json").read_text().lower()
- for word in["express","fastapi","supabase","firebase","mongodb","postgres","redis","@vercel/postgres"]:assert word not in package
+ for word in["express","fastapi","firebase","mongodb","postgres","redis","@vercel/postgres"]:assert word not in package # supabase is the owner-approved recall-history store (2026-10-05)
 def test_no_mock_datasource():
  s=sources().lower();assert "mockdatasource" not in s and "fixturedatasource" not in s
  for p in ROOT.rglob("*"):

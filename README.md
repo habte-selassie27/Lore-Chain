@@ -85,6 +85,16 @@ VITE_LORECHAIN_CONTRACT=0x...
 
 The frontend intentionally does not fall back to fake data if the address or network is unavailable.
 
+### Optional recall history sync (Supabase)
+
+Semantic-recall history is browser-local by default. To sync it per wallet across devices:
+
+1. Create a Supabase project and run `supabase/schema.sql` in its SQL editor.
+2. Enable **Authentication → Sign In / Up → Web3 → Ethereum**.
+3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (locally in `.env.local`, on Vercel in project env).
+
+The app signs in with the injected wallet (EIP-4361) and row-level security isolates history per wallet. Without these variables the app silently stays browser-local. Canonical truth is unchanged — it lives only in the contract.
+
 ## Verification
 
 ```bash
